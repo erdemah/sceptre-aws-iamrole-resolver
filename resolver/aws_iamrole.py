@@ -6,7 +6,7 @@ import logging
 
 from botocore.exceptions import ClientError
 from sceptre.resolvers import Resolver
-from resolver.aws_iamrole_exceptions import IAMRoleNotFoundError
+from resolver.aws_iamrole_exceptions import IAMRoleNotFoundError, IAMRoleAmbiguousError
 
 TEMPLATE_EXTENSION = ".yaml"
 
@@ -30,7 +30,7 @@ class AwsIAMRoleBase(Resolver):
         :type param: string
         :returns: IAM Role name.
         :rtype: str
-        :raises: KeyError
+        :raises: KeyError, IAMRoleNotFoundError, IAMRoleAmbiguousError
         """
         response_roles = self._request_iam_role(path_prefix, region, profile)
         if response_roles is None or response_roles == []:
@@ -42,16 +42,37 @@ class AwsIAMRoleBase(Resolver):
             )
 
         try:
-            self.logger.debug("Got response_roles: {0}".format(response_roles))
-            for role in response_roles:
-                self.logger.debug("Checking role: {0}".format(role))
-                if role["Path"] == path_prefix and role_name in role["RoleName"]:
-                    return role["RoleName"]
+            matches = [
+                role["RoleName"]
+                for role in response_roles
+                if role["Path"] == path_prefix and role_name in role["RoleName"]
+            ]
         except KeyError:
             self.logger.error(
                 "%s - Invalid response looking for: %s", self.stack.name, role_name
             )
             raise
+
+        if matches == []:
+            self.logger.error(
+                "%s - No IAM Roles matched partial name: %s", self.stack.name, role_name
+            )
+            raise IAMRoleNotFoundError(
+                "No IAM Roles matched partial name: {0}".format(role_name)
+            )
+
+        if len(matches) > 1:
+            self.logger.error(
+                "%s - Partial name '%s' matched multiple roles: %s",
+                self.stack.name, role_name, matches
+            )
+            raise IAMRoleAmbiguousError(
+                "Partial name '{0}' matched multiple roles: {1}".format(
+                    role_name, ", ".join(matches)
+                )
+            )
+
+        return matches[0]
 
     def _request_iam_role(self, path_prefix, region, profile=None):
         """
