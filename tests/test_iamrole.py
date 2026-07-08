@@ -9,7 +9,7 @@ from sceptre.connection_manager import ConnectionManager
 from sceptre.stack import Stack
 
 from resolver.aws_iamrole import AwsIAMRole, AwsIAMRoleBase
-from resolver.aws_iamrole_exceptions import IAMRoleNotFoundError
+from resolver.aws_iamrole_exceptions import IAMRoleNotFoundError, IAMRoleAmbiguousError
 
 
 region = "us-east-1"
@@ -44,9 +44,7 @@ class TestIAMRoleResolver(object):
         stack.region = region
         stack.dependencies = []
         stack._connection_manager = MagicMock(spec=ConnectionManager)
-        stack_iam_role_resolver = AwsIAMRole(
-            "web-InstanceRole", stack
-        )
+        stack_iam_role_resolver = AwsIAMRole("web-InstanceRole", stack)
         mock_get_iam_role_name.return_value = "web-InstanceRole-1WD7WGZALMECA"
         stack_iam_role_resolver.resolve()
         mock_get_iam_role_name.assert_called_once_with(
@@ -64,9 +62,7 @@ class TestIAMRoleResolver(object):
         stack.region = region
         stack.dependencies = []
         stack._connection_manager = MagicMock(spec=ConnectionManager)
-        stack_iam_role_resolver = AwsIAMRole(
-            {"name": "web-InstanceRole"}, stack
-        )
+        stack_iam_role_resolver = AwsIAMRole({"name": "web-InstanceRole"}, stack)
         mock_get_iam_role_name.return_value = "web-InstanceRole-1WD7WGZALMECA"
         stack_iam_role_resolver.resolve()
         mock_get_iam_role_name.assert_called_once_with(
@@ -85,9 +81,7 @@ class TestIAMRoleResolver(object):
         stack.dependencies = []
         stack._connection_manager = MagicMock(spec=ConnectionManager)
         stack_iam_role_resolver = AwsIAMRole(
-            {
-                "name": "web-InstanceRole"
-            },
+            {"name": "web-InstanceRole"},
             stack,
         )
         mock_get_iam_role_name.return_value = "web-InstanceRole-1WD7WGZALMECA"
@@ -108,10 +102,7 @@ class TestIAMRoleResolver(object):
         stack.dependencies = []
         stack._connection_manager = MagicMock(spec=ConnectionManager)
         stack_iam_role_resolver = AwsIAMRole(
-            {
-                "name": "web-InstanceRole",
-                "prefix": "/custom/prefix/"
-            },
+            {"name": "web-InstanceRole", "prefix": "/custom/prefix/"},
             stack,
         )
         mock_get_iam_role_name.return_value = "web-InstanceRole-1WD7WGZALMECA"
@@ -213,14 +204,12 @@ class TestAwsIAMRoleBase(object):
                     "Statement": [
                         {
                             "Effect": "Allow",
-                            "Principal": {
-                                "Service": "ec2.amazonaws.com"
-                            },
-                            "Action": "sts:AssumeRole"
+                            "Principal": {"Service": "ec2.amazonaws.com"},
+                            "Action": "sts:AssumeRole",
                         }
-                    ]
+                    ],
                 },
-                "MaxSessionDuration": 3600
+                "MaxSessionDuration": 3600,
             }
         ]
 
@@ -243,14 +232,12 @@ class TestAwsIAMRoleBase(object):
                     "Statement": [
                         {
                             "Effect": "Allow",
-                            "Principal": {
-                                "Service": "ec2.amazonaws.com"
-                            },
-                            "Action": "sts:AssumeRole"
+                            "Principal": {"Service": "ec2.amazonaws.com"},
+                            "Action": "sts:AssumeRole",
                         }
-                    ]
+                    ],
                 },
-                "MaxSessionDuration": 3600
+                "MaxSessionDuration": 3600,
             }
         ]
 
@@ -260,18 +247,41 @@ class TestAwsIAMRoleBase(object):
         assert response == "web-InstanceRole-1WD7WGZALMECA"
 
     @patch("resolver.aws_iamrole.AwsIAMRoleBase._request_iam_role")
-    def test_get_iam_role_name_with_invalid_response(
-        self, mock_request_iam_role
-    ):
+    def test_get_iam_role_name_with_invalid_response(self, mock_request_iam_role):
         mock_request_iam_role.return_value = [
-            {
-                "CreateDate": "2023-04-27T00:42:11Z",
-                "MaxSessionDuration": 3600
-            }
+            {"CreateDate": "2023-04-27T00:42:11Z", "MaxSessionDuration": 3600}
         ]
 
         with pytest.raises(KeyError):
             self.base_iam_role._get_iam_role_name(None, region)
+
+    @patch("resolver.aws_iamrole.AwsIAMRoleBase._request_iam_role")
+    def test_get_iam_role_name_with_no_match(self, mock_request_iam_role):
+        mock_request_iam_role.return_value = [
+            {
+                "Path": "/",
+                "RoleName": "other-InstanceRole-1WD7WGZALMECA",
+            }
+        ]
+
+        with pytest.raises(IAMRoleNotFoundError):
+            self.base_iam_role._get_iam_role_name("web-InstanceRole", "/", region)
+
+    @patch("resolver.aws_iamrole.AwsIAMRoleBase._request_iam_role")
+    def test_get_iam_role_name_with_multiple_matches(self, mock_request_iam_role):
+        mock_request_iam_role.return_value = [
+            {
+                "Path": "/",
+                "RoleName": "web-InstanceRole-1WD7WGZALMECA",
+            },
+            {
+                "Path": "/",
+                "RoleName": "web-InstanceRole-2AB8XHYBMNFDB",
+            },
+        ]
+
+        with pytest.raises(IAMRoleAmbiguousError):
+            self.base_iam_role._get_iam_role_name("web-InstanceRole", "/", region)
 
     def test_request_iam_role_with_unkown_boto_error(self):
         self.stack.connection_manager.call.side_effect = ClientError(

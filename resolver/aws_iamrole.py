@@ -21,7 +21,9 @@ class AwsIAMRoleBase(Resolver):
         self.logger = logging.getLogger(__name__)
         super(AwsIAMRoleBase, self).__init__(*args, **kwargs)
 
-    def _get_iam_role_name(self, role_name, path_prefix='/', region='us-east-1', profile=None):
+    def _get_iam_role_name(
+        self, role_name, path_prefix="/", region="us-east-1", profile=None
+    ):
         """
         Attempts to get the IAM Role Name with tag:Name by ``param``
         :param role_name: The partial role name of the IAM Role in which to return.
@@ -64,7 +66,9 @@ class AwsIAMRoleBase(Resolver):
         if len(matches) > 1:
             self.logger.error(
                 "%s - Partial name '%s' matched multiple roles: %s",
-                self.stack.name, role_name, matches
+                self.stack.name,
+                role_name,
+                matches,
             )
             raise IAMRoleAmbiguousError(
                 "Partial name '{0}' matched multiple roles: {1}".format(
@@ -82,7 +86,7 @@ class AwsIAMRoleBase(Resolver):
         :raises: resolver.exceptions.IAMRoleNotFoundError
         """
         connection_manager = self.stack.connection_manager
-        region_arg = 'us-east-1'
+        region_arg = "us-east-1"
         response_roles = []
         max_items = 100
         try:
@@ -99,7 +103,11 @@ class AwsIAMRoleBase(Resolver):
             is_truncated = response.get("IsTruncated", False)
             while is_truncated:
                 marker = response.get("Marker")
-                kwargs = {"PathPrefix": path_prefix, "Marker": marker, "MaxItems": max_items}
+                kwargs = {
+                    "PathPrefix": path_prefix,
+                    "Marker": marker,
+                    "MaxItems": max_items,
+                }
                 response = connection_manager.call(
                     service="iam",
                     command="list_roles",
@@ -112,9 +120,7 @@ class AwsIAMRoleBase(Resolver):
             self.logger.debug("Finished calling iam.list_roles")
         except ClientError as e:
             if "IAMRoleNotFound" in e.response["Error"]["Code"]:
-                self.logger.error(
-                    "%s - IAMRoleNotFound: %s", self.stack.name, kwargs
-                )
+                self.logger.error("%s - IAMRoleNotFound: %s", self.stack.name, kwargs)
                 raise IAMRoleNotFoundError(e.response["Error"]["Message"])
             else:
                 raise e
@@ -146,14 +152,12 @@ class AwsIAMRole(AwsIAMRoleBase):
             raise ValueError("Missing argument")
 
         instance_id = None
-        self.logger.debug(
-            "Resolving IAM Role with argument: {0}".format(args)
-        )
+        self.logger.debug("Resolving IAM Role with argument: {0}".format(args))
         name = self.argument
         region = self.stack.region
         profile = self.stack.profile
         role_name = name
-        path_prefix = '/'
+        path_prefix = "/"
         if isinstance(args, dict):
             if "name" in args:
                 role_name = args["name"]
